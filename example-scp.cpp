@@ -1,105 +1,82 @@
 #include "example-scp.h"
 
 using namespace std;
-int entrypc; // entry of program
+int entrypc; // entries of program
 
 vector<symbol> symbol_table;
-map<symbol, vector<int> > use; 
-map<symbol, vector<int> > def; 
-
 vector<instruction> insts;
-vector<function> funcs;
+vector<Function> funcs;
 
-//use these two input to generate edges of cfg
-map<int, int> entry;// entry of BB
+//use these three input to generate edges of cfg
+set<int> entries;// entries of BB
 set<pair<int,int> >edges;//original edge of instructions
+set<pair<int,int> >potential_edges;
 /////////
 
 /* 
- * read 3addr file, get all entry of bb
+ * read 3addr file, get all entries of bb
 */
 void parse(FILE *fp){
-    int bb_num=0; // num of bb
+    set<symbol> tmp_symbol_table;
     int inst_id;
     char inst[32];
     char op1[32];
     char op2[32];
-    int entry_func=0;
-    int func_id=-1;
-    set<pair<int,int> > br_target_1;
+    int entry_func;
 
     while(fscanf(fp, "    instr %d: %s", &inst_id, inst) != EOF){
-        instruction i;
+        instruction i(inst);
         i.id = inst_id;
-        strcpy(i.inst, inst);
-
-        string ins(inst);
-        switch (op_num[ins])
+        switch (op_num[i.op_code])
         {
         case 0:
-            if(ins == "entrypc"){
+            if(strcmp(inst, "entrypc") == 0){
                 entrypc = inst_id;
             }
             i.op_num=0;
-            i.op1[0] = '\0';
-            i.op2[0] = '\0';
+            i.op1 = "";
+            i.op2 = "";
             break;
         case 1:
             fscanf(fp,"%s",op1);
             if(strcmp(inst, "enter") == 0){
                 entry_func = inst_id;
-                func_id++;
-                auto res = entry.insert(pair<int,int>(inst_id,func_id));
-                if(res.second)
-                    bb_num++;
+                entries.insert(inst_id);
             }
             else if(strcmp(inst, "br") == 0){
                 int tmp;
                 sscanf(op1, "[%d]", &tmp);
-                auto res = entry.insert(pair<int,int>(tmp,func_id));
+                entries.insert(tmp);
                 edges.insert(make_pair(inst_id, tmp));
-                // if(strcmp(insts[tmp-2].inst, "call") != 0 && strcmp(insts[tmp-2].inst, "br") != 0)
-                //     edges.insert(make_pair(tmp-1, tmp));
-                br_target_1.insert(make_pair(tmp-1,tmp));
-                if(res.second)
-                    bb_num++;
+                potential_edges.insert(make_pair(tmp-1,tmp));
             }
             else if(strcmp(inst, "call") == 0){
-                auto res = entry.insert(pair<int,int>(inst_id+1,func_id));
+                entries.insert(inst_id+1);
                 edges.insert(make_pair(inst_id, inst_id+1));
-                if(res.second)
-                    bb_num++;
             }
             else if(strcmp(inst, "ret") == 0){
-                function f(bb_num, entry_func, inst_id);
+                Function f(entry_func, inst_id);
                 funcs.push_back(f);
-                bb_num = 0; 
             }
             i.op_num=1;
-            strcpy(i.op1, op1);
-            i.op2[0] = '\0';
+            i.op1 = string(op1);
+            i.op2 = "";
             break;
         case 2:
             fscanf(fp,"%s",op1);
             fscanf(fp,"%s",op2);
             if(strcmp(inst, "blbc") == 0 || strcmp(inst, "blbs") == 0){
-                auto res = entry.insert(pair<int,int>(inst_id+1,func_id));
+                entries.insert(inst_id+1);
                 edges.insert(make_pair(inst_id, inst_id+1));
-                if(res.second)
-                    bb_num++;
                 int tmp;
                 sscanf(op2, "[%d]", &tmp);
-                res = entry.insert(pair<int,int>(tmp,func_id));
+                entries.insert(tmp);
                 edges.insert(make_pair(inst_id, tmp));
-                // if(strcmp(insts[tmp-2].inst, "call") != 0 && strcmp(insts[tmp-2].inst, "br") != 0)
-                //     edges.insert(make_pair(tmp-1, tmp));
-                br_target_1.insert(make_pair(tmp-1,tmp));
-                if(res.second)
-                    bb_num++;
+                potential_edges.insert(make_pair(tmp-1,tmp));
             }
             i.op_num=2;
-            strcpy(i.op1, op1);
-            strcpy(i.op2, op2);
+            i.op1 = string(op1);
+            i.op2 = string(op2);
             break;
         default:
             break;
@@ -117,46 +94,69 @@ void parse(FILE *fp){
     //     printf("\n");
     // }
 
-    for(auto iter = br_target_1.begin();iter!=br_target_1.end();iter++){
-        if(strcmp(insts[iter->first-1].inst, "call") != 0 && strcmp(insts[iter->first-1].inst, "br") != 0){
+    for(auto iter = potential_edges.begin();iter!=potential_edges.end();iter++){
+        if(insts[iter->first].op_code != "call" && insts[iter->first].op_code != "br"){
             edges.insert(make_pair(iter->first, iter->second));
         }
     }
+
+    copy(tmp_symbol_table.begin(), tmp_symbol_table.end(), back_inserter(symbol_table));
+    // basic_block::sym_num = symbol_table.size();
 }
 
 /* 
- * construct cfg, entry,edge->function.list
+ * construct cfg, entries,edge->Function.list
  */
 void construct_cfg(){
+    // int i=0;
+    // int func_id=0;
+
+    //first cycle: store all bbs in functions
+    auto f = funcs.begin();
     int i=0;
-    int func_id=0;
-    for(auto iter = entry.begin(); iter != entry.end(); iter++) {
-        if(func_id != iter->second){
-            func_id = iter->second;
+    for(auto entry = entries.begin(); entry != entries.end(); entry++) {
+        if(*entry > f->end_ins){
+            //should not reach funcs.end()
+            assert(i == f->bbs.size());
+            f++;
             i=0;
         }
-
-        funcs[iter->second].bb_list.insert(make_pair(iter->first, i++));
+        auto tmp = next(entry);
+        if(tmp != entries.end()){
+            f->bbs.push_back(basic_block(*entry, (*tmp)-1));
+        }
+        else{
+            f->bbs.push_back(basic_block(*entry, f->end_ins));
+        }
+        f->bb_map.insert(make_pair(*entry,i++));
     }
-    
+
+    //second cycle: add pre & suc to bbs
+    auto func = funcs.begin();
     for(auto edge = edges.begin(); edge != edges.end(); edge++) {
-        auto res = entry.find(edge->second);
-        if(edge->first > res->first){
-            while(res->first <= edge->first){
+        while(edge->first > func->end_ins || edge->second > func->end_ins){
+            func++;
+        }
+        auto res = entries.find(edge->second);
+        //edge->first may not be a entry of a bb
+        //edge->second must be a entry of a bb
+        //following if-else finds the bb that the edge->first belongs to 
+        if(edge->first > *res){
+            while(*res <= edge->first){
                 res++;
             }
-            if(res != entry.begin())
+            if(res != entries.begin())
                 res--;
         }
         else{
-            while(res->first > edge->first){
+            while(*res > edge->first){
                 res--;
             }
         }
-        int id1 = funcs[res->second].bb_list[res->first];
-        int id2 = funcs[res->second].bb_list[edge->second];
-        funcs[res->second].list[id1].push_back(edge->second);
-        funcs[res->second].rev_list[id2].push_back(res->first);
+        int from = func->bb_map.at(*res);
+        int to = func->bb_map.at(edge->second);
+        func->bbs[from].suc.push_back(to);
+        func->bbs[to].pre.push_back(from);
     }
 }
 
@@ -165,20 +165,18 @@ void construct_cfg(){
  */
 void print_cfg(){
     for(auto func = funcs.begin(); func != funcs.end(); func++) {
-        printf("Function: %d\n", func->entry);
+        printf("Function: %d\n", func->start_ins);
         printf("Basic blocks:");
-        for(auto bb = func->bb_list.begin(); bb != func->bb_list.end(); bb++){
-            printf(" %d", bb->first);
+        for(auto bb = func->bbs.begin(); bb != func->bbs.end(); bb++){
+            printf(" %d", bb->start_ins);
         }
         printf("\nCFG:\n");
-        auto bb = func->bb_list.begin();
-        for(int i=0;i<func->bb_num;i++){
-            printf("%d ->", bb->first);
-            for(int j = 0; j < func->list[i].size(); j++){
-                printf(" %d",func->list[i][j]);
+        for(auto bb = func->bbs.begin(); bb != func->bbs.end(); bb++){
+            printf("%d ->", bb->start_ins);
+            for(auto b = bb->suc.begin(); b != bb->suc.end(); b++){ 
+                printf(" %d", func->bbs[*b].start_ins);
             }
             printf("\n");
-            bb++;
         }
     }
 }
@@ -188,12 +186,13 @@ int main(int argc, char*argv[]){
     if(fp == NULL){
         printf("error open input file\n");
     }
+    insts.push_back(instruction());
     // char file_name[256];
     // fscanf(fp,"compiling %s",file_name);
     parse(fp);
     construct_cfg();
     print_cfg();
-    // for(auto iter = entry.begin(); iter != entry.end(); iter++) {
+    // for(auto iter = entries.begin(); iter != entries.end(); iter++) {
     //     printf("%d\n", iter->first);
     // }
 }
