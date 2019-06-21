@@ -30,16 +30,48 @@ zero op: wrl, entrypc, nop
 one op: neg, br, call, load, store, enter, ret, param, read, write
 two op: add, sub, mul, div, mod, cmpeq, cmple, cmplt, blbc, blbs, move
 */
-std::map<std::string, int> op_num = {
+map<string, int> op_num = {
     {"wrl",0}, {"entrypc",0}, {"nop",0},
     {"neg",1}, {"br",1}, {"call",1}, {"load",1},  {"enter",1},   {"ret",1}, {"param",1}, {"read",1}, {"write",1},
     {"store",2}, {"add",2}, {"sub",2}, {"mul",2}, {"div",2}, {"mod",2}, {"cmpeq",2},  {"cmple",2}, {"cmplt",2}, {"blbc",2}, {"blbs",2},{"move",2}
 };
+
+//NO_USE_DEF
+#define NUD 0
+#define USE 1
+#define DEF 2
+//TODO : load instruction ?
+map<string, int>ud1_table={
+    {"neg",USE}, {"br",NUD}, {"call",NUD}, {"load",USE},  {"enter",NUD},   {"ret",NUD}, {"param",USE},{"read",DEF}, {"write",USE}
+};
+map<string, pair<int,int> >ud2_table={
+    {"store",make_pair(USE,DEF)}, {"add",make_pair(USE,USE)}, {"sub",make_pair(USE,USE)}, {"mul",make_pair(USE,USE)}, {"div",make_pair(USE,USE)}, {"mod",make_pair(USE,USE)}, {"cmpeq",make_pair(USE,USE)},  {"cmple",make_pair(USE,USE)}, {"cmplt",make_pair(USE,USE)}, {"blbc",make_pair(USE,USE)}, {"blbs",make_pair(USE,USE)},{"move",make_pair(USE,DEF)}
+};
+
+#define LOCAL 0
+#define GLOBAL 1
 struct symbol
 {
     string name;
-    bool operator<(const symbol &a){
-        return (this->name < a.name);
+    int type;
+    int address;
+    bool operator<(const symbol a) const{
+        return (this->name < a.name) || (this->name == a.name && this->type < a.type);
+    }
+    bool operator==(const symbol a) const{
+        return (this->name == a.name && this->type == a.type);
+    }
+    symbol(){}
+    symbol(string &n,int addr,int t){
+        if(t == GLOBAL){
+            size_t index = n.rfind("_base");
+            // if(index != std::string::npos){
+                n.replace(index, 5, "");
+            // }
+        }
+        type = t;
+        name = n;
+        address = addr;
     }
 };
 
@@ -50,6 +82,9 @@ struct instruction
     int op_num;
     string op1;
     string op2;
+    int use1=-1;//symbol_table index
+    int use2=-1;
+    int def=-1;
     instruction(){
         id = 0;
         op_code="nop";
@@ -60,6 +95,31 @@ struct instruction
     }
 };
 
+//instruction that performs a def,
+//move and store are considered
+//read is not considered
+struct def_instruction
+{
+    int start_ins;
+    int end_ins;
+    int def;//symbol_table index
+    vector<int> use;//symbol_table index
+    long long value;
+    def_instruction(){}
+};
+
+//instruction that performs a use
+//TODO reach defination need use instruction???
+struct use_instruction
+{
+    int start_ins;
+    int end_ins;
+    int def;//symbol_table index
+    vector<int> use;//symbol_table index
+    long long value;
+    use_instruction(){}
+};
+
 class basic_block
 {
 public:
@@ -68,6 +128,8 @@ public:
     int end_ins;
     boost::dynamic_bitset<> use;
     boost::dynamic_bitset<> def;
+    boost::dynamic_bitset<> in;
+    boost::dynamic_bitset<> out;
     vector<int> pre;//存储在function中bbs的下标
     vector<int> suc;//存储在function中bbs的下标
     basic_block(int start_ins, int end_ins){
@@ -84,6 +146,8 @@ public:
     int end_ins;
     vector<basic_block> bbs;
     map<int, int> bb_map;
+    vector<symbol> symbol_table;
+    vector<def_instruction> def_ins_table;
 // public:
     Function(){}
     Function(int start_ins, int end_ins){
