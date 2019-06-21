@@ -126,8 +126,8 @@ public:
     static int sym_num;
     int start_ins;
     int end_ins;
-    boost::dynamic_bitset<> use;
-    boost::dynamic_bitset<> def;
+    boost::dynamic_bitset<> gen;
+    boost::dynamic_bitset<> kill;
     boost::dynamic_bitset<> in;
     boost::dynamic_bitset<> out;
     vector<int> pre;//存储在function中bbs的下标

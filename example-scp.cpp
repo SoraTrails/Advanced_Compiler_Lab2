@@ -223,12 +223,12 @@ void print_bit_vector(){
     for(auto f:funcs) {
         printf("Func %d\n",f.start_ins);
         for(auto bb:f.bbs){
-            string use;
-            string def;
-            boost::to_string(bb.use,use);
-            boost::to_string(bb.def,def);
+            string gen;
+            string kill;
+            boost::to_string(bb.gen,gen);
+            boost::to_string(bb.kill,kill);
 
-            printf("basic block %d-%d: use:%s; def:%s\n",bb.start_ins,bb.end_ins, use.c_str(), def.c_str());
+            printf("basic block %d-%d: gen:%s; kill:%s\n",bb.start_ins,bb.end_ins, gen.c_str(), kill.c_str());
         }
         printf("\n");
     }
@@ -508,24 +508,24 @@ void generate_bit_vec_of_bb(){
             int start_ins = bb->start_ins;
             int end_ins = bb->end_ins;
             //存放def_instruction在def_ins_table中的下标
-            set<int>use;
-            set<int>def;
-            bb->use.resize(f->def_ins_table.size(),false);
-            bb->def.resize(f->def_ins_table.size(),false);
+            set<int>gen;
+            set<int>kill;
+            bb->gen.resize(f->def_ins_table.size(),false);
+            bb->kill.resize(f->def_ins_table.size(),false);
             
             if(def_ins == f->def_ins_table.end()){
                 continue;
             }
             while(def_ins->start_ins >= start_ins && def_ins->end_ins <= end_ins){
                 int distance = def_ins - f->def_ins_table.begin();
-                use.insert(distance);
+                gen.insert(distance);
                 for(auto tmp = f->def_ins_table.begin();tmp != f->def_ins_table.end();tmp++){
                     //same position, skip
                     if(tmp == def_ins){
                         continue;
                     }
                     if(tmp->def == def_ins->def){
-                        def.insert(tmp - f->def_ins_table.begin());
+                        kill.insert(tmp - f->def_ins_table.begin());
                     }
                 }
                 def_ins++;
@@ -534,11 +534,11 @@ void generate_bit_vec_of_bb(){
                 }
             }
             //更新位向量
-            for(auto i : use){
-                bb->use.set(i);
+            for(auto i : gen){
+                bb->gen.set(i);
             }
-            for(auto i : def){
-                bb->def.set(i);
+            for(auto i : kill){
+                bb->kill.set(i);
             }
             // if(def_ins == f->def_ins_table.end()){
             //     break;
@@ -579,8 +579,8 @@ void dfa_reaching_definitions(){
                 }
                 boost::dynamic_bitset<> tmp(out[i]);
 
-                // OUT[B] = USE{B} UNION (IN[B] - DEF{B})
-                out[i] = f->bbs[i].use | (in[i] & ~(f->bbs[i].def));
+                // OUT[B] = GEN{B} UNION (IN[B] - KILL{B})
+                out[i] = f->bbs[i].gen | (in[i] & ~(f->bbs[i].kill));
 
                 if(out[i] != tmp){
                     flag = true;
