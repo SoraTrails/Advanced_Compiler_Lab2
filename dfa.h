@@ -32,20 +32,27 @@ two op: add, sub, mul, div, mod, cmpeq, cmple, cmplt, blbc, blbs, move
 */
 map<string, int> op_num = {
     {"wrl",0}, {"entrypc",0}, {"nop",0},
-    {"neg",1}, {"br",1}, {"call",1}, {"load",1},  {"enter",1},   {"ret",1}, {"param",1}, {"read",1}, {"write",1},
-    {"store",2}, {"add",2}, {"sub",2}, {"mul",2}, {"div",2}, {"mod",2}, {"cmpeq",2},  {"cmple",2}, {"cmplt",2}, {"blbc",2}, {"blbs",2},{"move",2}
+    {"neg",1}, {"br",1}, {"call",1}, {"load",1},  {"enter",1},   
+    {"ret",1}, {"param",1}, {"read",1}, {"write",1},
+    {"store",2}, {"add",2}, {"sub",2}, {"mul",2}, {"div",2}, 
+    {"mod",2}, {"cmpeq",2},  {"cmple",2}, {"cmplt",2}, 
+    {"blbc",2}, {"blbs",2},{"move",2}
 };
 
 //NO_USE_DEF
 #define NUD 0
 #define USE 1
 #define DEF 2
-//TODO : load instruction ?
 map<string, int>ud1_table={
     {"neg",USE}, {"br",NUD}, {"call",NUD}, {"load",USE},  {"enter",NUD},   {"ret",NUD}, {"param",USE},{"read",DEF}, {"write",USE}
 };
 map<string, pair<int,int> >ud2_table={
-    {"store",make_pair(USE,DEF)}, {"add",make_pair(USE,USE)}, {"sub",make_pair(USE,USE)}, {"mul",make_pair(USE,USE)}, {"div",make_pair(USE,USE)}, {"mod",make_pair(USE,USE)}, {"cmpeq",make_pair(USE,USE)},  {"cmple",make_pair(USE,USE)}, {"cmplt",make_pair(USE,USE)}, {"blbc",make_pair(USE,USE)}, {"blbs",make_pair(USE,USE)},{"move",make_pair(USE,DEF)}
+    {"store",make_pair(USE,DEF)},   {"add",make_pair(USE,USE)}, 
+    {"sub",make_pair(USE,USE)},     {"mul",make_pair(USE,USE)}, 
+    {"div",make_pair(USE,USE)},     {"mod",make_pair(USE,USE)}, 
+    {"cmpeq",make_pair(USE,USE)},   {"cmple",make_pair(USE,USE)}, 
+    {"cmplt",make_pair(USE,USE)},   {"blbc",make_pair(USE,USE)}, 
+    {"blbs",make_pair(USE,USE)},    {"move",make_pair(USE,DEF)}
 };
 
 #define LOCAL 0
@@ -56,7 +63,9 @@ struct symbol
     int type;
     int address;
     bool operator<(const symbol a) const{
-        return (this->name < a.name) || (this->name == a.name && this->type < a.type);
+        return 
+        (this->name < a.name) || 
+        (this->name == a.name && this->type < a.type);
     }
     bool operator==(const symbol a) const{
         return (this->name == a.name && this->type == a.type);
@@ -108,24 +117,13 @@ struct def_instruction
     def_instruction(){}
 };
 
-//instruction that performs a use
-//TODO reach defination need use instruction???
-struct use_instruction
-{
-    int start_ins;
-    int end_ins;
-    int def;//symbol_table index
-    vector<int> use;//symbol_table index
-    long long value;
-    use_instruction(){}
-};
-
 class basic_block
 {
 public:
-    static int sym_num;
     int start_ins;
     int end_ins;
+    boost::dynamic_bitset<> use;
+    boost::dynamic_bitset<> def;
     boost::dynamic_bitset<> gen;
     boost::dynamic_bitset<> kill;
     boost::dynamic_bitset<> in;
@@ -154,10 +152,5 @@ public:
         this->start_ins = start_ins;
         this->end_ins = end_ins;
     }
-    // Function(const Function & f){
-    //     this->start_ins = f.start_ins;
-    //     this->end_ins = f.end_ins;
-    // }
-    ~Function(){
-    }
+    ~Function(){}
 };

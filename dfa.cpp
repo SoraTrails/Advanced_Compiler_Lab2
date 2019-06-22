@@ -218,19 +218,41 @@ void print_def_ins_table(){
 /* 
  * print bit vector
  */
-void print_bit_vector(){
-    printf("bit vector:\n");
-    for(auto f:funcs) {
-        printf("Func %d\n",f.start_ins);
-        for(auto bb:f.bbs){
-            string gen;
-            string kill;
-            boost::to_string(bb.gen,gen);
-            boost::to_string(bb.kill,kill);
+void print_bit_vector(int type){
+    if(type == 0){
+        printf("bit vector:\n");
+        for(auto f:funcs) {
+            printf("Func %d\n",f.start_ins);
+            for(auto bb:f.bbs){
+                string gen;
+                string kill;
+                boost::to_string(bb.gen,gen);
+                boost::to_string(bb.kill,kill);
 
-            printf("basic block %d-%d: gen:%s; kill:%s\n",bb.start_ins,bb.end_ins, gen.c_str(), kill.c_str());
+                printf("basic block %d-%d: gen:%s; kill:%s\n",bb.start_ins,bb.end_ins, gen.c_str(), kill.c_str());
+            }
+            printf("\n");
         }
-        printf("\n");
+    }
+    else if(type == 1){
+        printf("bit vector:\n");
+        for(auto f:funcs) {
+            printf("Func %d\n",f.start_ins);
+            printf("symbol: ");
+            for(auto s:f.symbol_table){
+                printf("%s ",s.name.c_str());
+            }
+            printf("\n");
+            for(auto bb:f.bbs){
+                string use;
+                string def;
+                boost::to_string(bb.use,use);
+                boost::to_string(bb.def,def);
+
+                printf("basic block %d-%d: use:%s; def:%s\n",bb.start_ins,bb.end_ins, use.c_str(), def.c_str());
+            }
+            printf("\n");
+        }
     }
 }
 /* 
@@ -418,6 +440,30 @@ void upstream_def(int &op, int index, int &min_ins){
         op = insts[index].use2;
     }
 }
+
+/* 
+ * go upstream to find the use symbol of address
+ */
+void upstream_use(set<int> &op, int index, set<int> &def){
+    long long a;
+    int r = sscanf(insts[index].op1.c_str(), "(%lld)", &a);
+    if(r == 1){
+        upstream_use(op,(int)a, def);
+    }
+    else if(insts[index].use1 != -1){
+        if(def.find(insts[index].use1) == def.end())
+            op.insert(insts[index].use1);
+    }
+    r = sscanf(insts[index].op2.c_str(), "(%lld)", &a);
+    if(r == 1){
+        upstream_use(op,(int)a, def);
+    }
+    else if(insts[index].use2 != -1){
+        if(def.find(insts[index].use2) == def.end())
+            op.insert(insts[index].use2);
+    }
+}
+
 /* 
  * construct def_ins table
  */
@@ -499,9 +545,9 @@ void construct_def_ins_table(){
 }
 
 /* 
- * generate use def (gen kill) bit vector of basic block
+ * generate gen kill bit vector of basic block
  */
-void generate_bit_vec_of_bb(){
+void generate_gen_kill_bit_vec_of_bb(){
     for(auto f = funcs.begin();f != funcs.end();f++){
         auto def_ins = f->def_ins_table.begin();
         for(auto bb = f->bbs.begin();bb != f->bbs.end();bb++){
@@ -543,6 +589,62 @@ void generate_bit_vec_of_bb(){
             // if(def_ins == f->def_ins_table.end()){
             //     break;
             // }
+        }
+    }
+}
+
+/* 
+ * generate use def bit vector of basic block
+ */
+void generate_use_def_bit_vec_of_bb(){
+    for(auto f = funcs.begin();f != funcs.end();f++){
+        auto def_ins = f->def_ins_table.begin();
+        for(auto bb = f->bbs.begin();bb != f->bbs.end();bb++){
+            bb->use.resize(f->symbol_table.size(),false);
+            bb->def.resize(f->symbol_table.size(),false);
+            // if(def_ins == f->def_ins_table.end()){
+            //     continue;
+            // }
+            set<int> use;
+            set<int> def;
+            for(int i=bb->start_ins;i<=bb->end_ins;i++){
+                if(def_ins != f->def_ins_table.end() && def_ins->start_ins <= i && def_ins->end_ins >= i){
+                    i = def_ins->end_ins;
+                    //add use and def
+                    for(auto di : def_ins->use){
+                        if(def.find(di) == def.end()){
+                            use.insert(di);
+                        }
+                    }
+                    if(use.find(def_ins->def) == use.end()){
+                        def.insert(def_ins->def);
+                    }
+                    def_ins++;
+                    // if(def_ins == f->def_ins_table.end()){
+                    //     break;
+                    // }
+                }
+                else{
+                    if(insts[i].op_num == 1){
+                        if(ud1_table.at(insts[i].op_code) == USE){
+                            upstream_use(use, i, def);
+                        }
+                    }
+                    else if(insts[i].op_num == 2){
+                        if(insts[i].op_code != "store" && insts[i].op_code != "move"){
+                            upstream_use(use, i, def);
+                        }
+                    }
+                }
+            }
+            for(auto i : use){
+                bb->use.set(i);
+                // bb->use.set(f->symbol_table.size()-i-1);
+            }
+            for(auto i : def){
+                bb->def.set(i);
+                // bb->def.set(f->symbol_table.size()-i-1);
+            }
         }
     }
 }
@@ -595,6 +697,57 @@ void dfa_reaching_definitions(){
         }
     }
 }
+/* 
+ * main procedure of data flow analysis of living variables
+ */
+void dfa_living_variables(){
+    for(auto f = funcs.begin();f != funcs.end();f++){
+        int bit_vec_width = f->symbol_table.size();
+        vector< boost::dynamic_bitset<> > out(f->bbs.size());
+        vector< boost::dynamic_bitset<> > in(f->bbs.size());
+
+        //in out initialization
+        for(auto i = out.begin();i != out.end();i++){
+            i->resize(bit_vec_width,false);
+        }
+        for(auto i = in.begin();i != in.end();i++){
+            i->resize(bit_vec_width,false);
+        }
+        bool flag;
+        do{
+            flag = false;
+            for(int i=f->bbs.size()-1;i>=0;i--){
+                if(f->bbs[i].suc.size() == 0){
+                    // TODO 默认程序出口处全部变量有效
+                    // out[i].reset();
+                    out[i].set();
+                }
+                else{
+                    // OUT[B] = UNION{S,suc(B)}OUT[S]
+                    out[i] = in[f->bbs[i].suc[0]];
+                    for(int j = 1;j < f->bbs[i].suc.size();j++){
+                        out[i] |= in[f->bbs[i].suc[j]];
+                    }
+                }
+                boost::dynamic_bitset<> tmp(in[i]);
+
+                // IN[B] = USE{B} UNION (OUT[B] - DEF{B})
+                in[i] = f->bbs[i].use | (out[i] & ~(f->bbs[i].def));
+
+                if(in[i] != tmp){
+                    flag = true;
+                }
+            }
+        }
+        while(flag);
+
+        for(int i=0;i<f->bbs.size();i++){
+            f->bbs[i].in = in[i];
+            f->bbs[i].out = out[i];
+        }
+    }
+
+}
 
 /* 
  * main procedure of contstant propagation 
@@ -645,6 +798,45 @@ void contstant_propagation(){
 
 }
 
+/* 
+ * main procedure of dead code elimination 
+ */
+void dead_code_elimination(){
+    // for all out of a bb, if x is not alive, then def of x inside bb can be eliminated
+
+    for(auto f = funcs.begin();f != funcs.end();f++){
+        auto def_ins = f->def_ins_table.begin();
+
+        for(auto bb = f->bbs.begin();bb != f->bbs.end(); bb++){
+            if(def_ins == f->def_ins_table.end()){
+                break;
+            }
+            while(def_ins->end_ins <= bb->start_ins){
+                def_ins++;
+                if(def_ins == f->def_ins_table.end()){
+                    break;
+                }
+            }
+            for(int i=0;i<bb->out.size();i++){
+                if(!bb->out.test(i)){
+                    for(auto def_ins_head = def_ins;def_ins_head->end_ins <= bb->end_ins && def_ins_head != f->def_ins_table.end(); def_ins_head++){
+                        //eliminate
+                        if(def_ins_head->def == i){
+                            for(int j=def_ins_head->start_ins;j<= def_ins_head->end_ins;j++){
+                                insts[j].op_code = "nop";
+                                insts[j].op_num = 0;
+                                insts[j].use1 = -1;
+                                insts[j].use2 = -1;
+                                insts[j].def = -1;
+                            }
+                        }
+                    }       
+                }
+            }
+        }
+    }
+}
+
 int main(int argc, char*argv[]){
     FILE *fp = fopen(argv[1], "r");
     if(fp == NULL){
@@ -660,11 +852,12 @@ int main(int argc, char*argv[]){
     construct_symbol_table();
     print_symbol_table();
 
+    //reaching defination
     construct_def_ins_table();
     print_def_ins_table();
 
-    generate_bit_vec_of_bb();
-    print_bit_vector();
+    generate_gen_kill_bit_vec_of_bb();
+    print_bit_vector(0);
 
     dfa_reaching_definitions();
     print_in_out();
@@ -672,4 +865,13 @@ int main(int argc, char*argv[]){
     contstant_propagation();
     print_optimized_3addr();
 
+    //living variables
+    generate_use_def_bit_vec_of_bb();
+    print_bit_vector(1);
+
+    dfa_living_variables();
+    print_in_out();
+
+    dead_code_elimination();
+    print_optimized_3addr();
 }
