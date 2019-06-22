@@ -1,4 +1,4 @@
-#include "example-scp.h"
+#include "dfa.h"
 
 using namespace std;
 int entrypc; // entries of program
